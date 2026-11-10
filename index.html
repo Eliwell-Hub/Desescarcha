@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desescarcha — programación de desescarches · Eliwell Ibérica SAT</title>
+<!-- 2026-11-10 — Utilidad «Desescarcha» (Hub Analítico RRG). Archivo independiente: se puede pasar a los
+     instaladores y abrir con cualquier navegador, sin instalar nada. Dentro del Hub se carga en su sección. -->
+<style>
+  :root{--bg:#0f1420;--sf:#161d2b;--bd:#2a3446;--tx:#e5e9f0;--mu:#93a0b4;--ac:#e86c1f;}
+  html[data-theme="light"]{--bg:#eef2f7;--sf:#ffffff;--bd:#d3dbe6;--tx:#1f2933;--mu:#5b6775;--ac:#d35400;}
+  @media (prefers-color-scheme: light){ html:not([data-theme]){--bg:#eef2f7;--sf:#ffffff;--bd:#d3dbe6;--tx:#1f2933;--mu:#5b6775;--ac:#d35400;} }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:"Segoe UI",Arial,sans-serif;font-size:14px;}
+  .des-cab{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--bd);background:var(--sf);}
+  .des-cab b{font-size:18px;} .des-cab span{color:var(--mu);font-size:13px;}
+  #des-root{padding:14px 18px;max-width:1500px;margin:0 auto;}
+  .tb{background:var(--ac);color:#fff;border:1px solid var(--ac);border-radius:7px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit;}
+  .tb:hover{filter:brightness(1.08);} .tb-sm{padding:4px 10px;font-size:13px;}
+  .tb-gh{background:transparent;color:var(--tx);border-color:var(--bd);} .tb-gh:hover{border-color:var(--ac);}
+  input,select,textarea{font-family:inherit;} label{font-size:13px;color:var(--mu);}
+  table td,table th{vertical-align:middle;}
+  /* 2026-11-10 — para el móvil (app instalable): una columna, botones y casillas para el dedo (16 px: el iPhone no
+     amplía al escribir), tablas y gráfico con desplazamiento lateral en vez de encogerse */
+  .des-cuerpo{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .des-grafico{max-width:100%;}
+  @media (max-width:700px){
+    #des-root{padding:10px;}
+    .des-cab{padding:10px 12px;} .des-cab span{display:none;}
+    .des-barra{flex-wrap:nowrap!important;overflow-x:auto;padding-bottom:4px;}
+    .des-barra .tb{white-space:nowrap;flex:0 0 auto;}
+    .tb{padding:9px 14px;font-size:14px;} .tb-sm{padding:8px 12px;font-size:14px;}
+    input,select,textarea{font-size:16px!important;min-height:38px;}
+    .des-form>label{flex:1 1 45%;} .des-form>label input,.des-form>label select{width:100%!important;}
+    .des-form>button{flex:1 1 100%;height:44px!important;}
+    .des-grafico{max-width:none;width:1000px;}
+    .des-cuerpo table{min-width:560px;}
+  }
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#e86c1f">
+<link rel="icon" href="icono-192.png">
+<link rel="apple-touch-icon" href="icono-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Desescarcha">
+</head>
+<body>
+<div class="des-cab"><b>❄️ Desescarcha</b><span>Programación y reparto de desescarches (RTX 600 / RTN / V800) · maestros y esclavos · gráfico 24 h · informe</span></div>
+<div id="des-root">Cargando…</div>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESESCARCHA — asistente de programación de desescarches (RTX 600 / RTN / V800)
+   2026-11-10 — Rafa: «una nueva utilidad, "Desescarcha": una especie de wizard,
+   seleccionando cómo tenemos la instalación, indicando qué son maestros y qué
+   esclavos y qué cantidad de cada tipo de servicio. Generaremos un mapeado de
+   parametrización para ajustar los desescarches en los horarios… un informe tipo
+   los que hacemos nosotros bien pro… el gráfico… máximos de servicios… y poder
+   decir cuál es maestro de cuál (no tiene por qué ser el 1 del 2)».
+   Modelo: «Informe de revisión — Desescarches tienda 7026 Independencia»
+   (27/05/2026): murales Fdn=8 / dit 3 h, grupos cada 15 min desde las 00:00 con
+   hasta 2 maestros por grupo; cámaras cada 90 min; vitrinas desde 01:30 cada 3 h;
+   armarios desde 02:30 cada 4 h; islas semanales lunes y viernes (Fd1/Fd2 + F1H).
+   Esclavos: dCt=2, dit = el del maestro + 1, Fdn=0 (siguen al maestro por Link2).
+   Parámetros (dbo.ParamBase RTX600/V): d1H/d1n hora del 1.er desescarche laborable
+   (solo dCt=4; d1H=24 deshabilitado) · dit intervalo (0 = nunca) · Fdn nº de
+   desescarches al día · Fd1/Fd2 días «festivo» 0–6 (domingo…sábado; 7 = no) ·
+   F1H/F1n hora del desescarche de esos días · dOH retardo desde la llamada.
+   Se guarda en la BD (dbo.ConfigSistema 'desescarcha:<centro>') y, sin BD, en el
+   navegador. Todos los valores por defecto son editables.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+  var DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','— (no)'];
+  var PARAMS=['dCt','dOH','dit','Fdn','d1H','d1n','Fd1','Fd2','F1H','F1n'];
+  var TIPOS_DEF=[
+    {id:'mural',   nombre:'Murales',          fam:'pos', modo:'diario',  max:60, pref:'MURAL',    fdn:8, dit:3,  ini:'00:00', sep:15,  porSlot:2, dur:30, color:'#2F80ED', patron:/MURAL/i},
+    {id:'vitrina', nombre:'Vitrinas',         fam:'pos', modo:'diario',  max:20, pref:'VITRINA',  fdn:4, dit:6,  ini:'01:30', sep:180, porSlot:1, dur:30, color:'#F2994A', patron:/VITRIN|VIT\./i},
+    {id:'camara',  nombre:'Cámaras',          fam:'neg', modo:'diario',  max:20, pref:'CÁMARA',   fdn:4, dit:7,  ini:'01:00', sep:90,  porSlot:1, dur:30, color:'#9B51E0', patron:/C[ÁA]M|CAMARA/i},
+    {id:'armario', nombre:'Armarios',         fam:'neg', modo:'diario',  max:30, pref:'ARMARIO',  fdn:2, dit:12, ini:'02:30', sep:240, porSlot:1, dur:30, color:'#27AE60', patron:/ARMARIO/i},
+    {id:'isla',    nombre:'Islas semanales',  fam:'neg', modo:'semanal', max:40, pref:'ISLA',     fdn:0, dit:96, ini:'01:00', sep:60,  porSlot:1, dur:30, color:'#EB5757', fd1:1, fd2:5, patron:/ISLA/i},
+    {id:'otro',    nombre:'Otros servicios',  fam:'pos', modo:'diario',  max:40, pref:'SERVICIO', fdn:4, dit:6,  ini:'03:00', sep:60,  porSlot:1, dur:30, color:'#56CCF2', patron:null}
+  ];
+  var PASOS=['1 · Centro','2 · Servicios','3 · Maestros y esclavos','4 · Distribución','5 · Resultado e informe'];
+  var D=null, paso=0, _seq=0;
+  /* Funciona SOLA (archivo para instaladores) o DENTRO del Hub (marco de la sección «Desescarcha»).
+     Dentro del Hub usa lo del Hub: Televis conectado, base de datos e informes Word/PDF del servidor.
+     Sola: guarda/abre en archivo (.json), PDF con la impresión del navegador y Word como documento .doc. */
+  var HUB=null; try{ if(window.parent&&window.parent!==window&&typeof window.parent.hubActivate==='function') HUB=window.parent; }catch(e){}
+  function hubTG(){ return HUB&&HUB.TG; }
+  function api(){ return HUB?(HUB._tgAPIraw||HUB.tgAPI):null; }
+  function dl(contenido, mime, nombre){ var b=new Blob([contenido],{type:mime}); var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=nombre; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(a.href); },3000); }
+
+  function diasTxt(t, corto, sep){ var a=DIAS[+t.fd1]||'', b=(+t.fd2>=0&&+t.fd2<7)?DIAS[+t.fd2]:''; if(corto){ a=a.slice(0,3); b=b.slice(0,3); } return b?(a+(sep||' y ')+b):a; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function hoy(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  function fFecha(s){ var m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+'/'+m[2]+'/'+m[1]):(s||''); }
+  function aMin(hhmm){ var m=String(hhmm||'0:0').match(/^(\d{1,2}):(\d{2})/); return m?((+m[1])*60+(+m[2]))%1440:0; }
+  function hhmm(min){ min=((Math.round(min)%1440)+1440)%1440; return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0'); }
+  function nuevoId(){ return 's'+Date.now().toString(36)+(++_seq); }
+  function tipoDe(id){ return D.tipos.find(function(t){ return t.id===id; }); }
+  function svc(id){ return D.servicios.find(function(s){ return s.id===id; }); }
+  function deTipo(tid){ return D.servicios.filter(function(s){ return s.tipo===tid; }); }
+
+  function plan0(){
+    return {version:1, cod:'', nombre:'', fecha:hoy(), controlador:'RTX 600/V Domino Zero', obs:'',
+      umbrales:{medio:6, alta:7}, cargaModo:'grupos', reparto:'auto',
+      tipos:[],   // 2026-11-10 — los grupos de servicios se crean en el paso 2 (antes, tipos fijos)
+      servicios:[]};
+  }
+  /* 2026-11-10 — Rafa: «en la pantalla de los servicios deja desplegables con toda la información y se van
+     generando los servicios: el nombre, positivo o negativo, cuántos desescarches, día o semana, cantidad… al
+     final uno de crear y pasas al siguiente». Cada «Crear» da un GRUPO de servicios (p. ej. «MURAL VERDURA» × 4)
+     con sus valores de reparto tomados del mueble elegido (se cambian en el paso 4). */
+  var PALETA=['#2F80ED','#F2994A','#9B51E0','#27AE60','#EB5757','#56CCF2','#F2C94C','#BB6BD9','#219653','#2D9CDB','#E2725B','#6FCF97'];
+  var FORM={mueble:'mural', nombre:'MURAL', fam:'pos', modo:'diario', cuantos:8, cantidad:1, desde:1};
+  function preset(id){ return TIPOS_DEF.find(function(x){ return x.id===id; })||TIPOS_DEF[TIPOS_DEF.length-1]; }
+  function nuevoGrupo(o){
+    var b=preset(o.mueble), modo=o.modo||b.modo, cu=parseInt(o.cuantos,10)||(modo==='semanal'?2:b.fdn||1);
+    var t={id:'g'+Date.now().toString(36)+(++_seq), mueble:b.id, nombre:o.nombre||b.nombre, pref:o.nombre||b.pref, fam:o.fam||b.fam, modo:modo,
+      fdn:(modo==='diario'?cu:0), dit:(modo==='diario'?Math.round(24/cu*10)/10:96), ini:b.ini, sep:b.sep, porSlot:b.porSlot, dur:b.dur,
+      fd1:1, fd2:(modo==='semanal'&&cu>=2?5:7), max:40, n:0, orden:[], color:PALETA[D.tipos.length%PALETA.length]};
+    if(b.id==='camara'&&modo==='diario') t.dit=b.dit;   // cámaras: dit de seguridad del informe de referencia (7 h)
+    D.tipos.push(t); return t;
+  }
+  function guardarBorrador(){ try{ localStorage.setItem('des:borrador', JSON.stringify(D)); }catch(e){} }
+  function cargarBorrador(){ try{ var x=JSON.parse(localStorage.getItem('des:borrador')||'null'); if(x&&x.tipos) return x; }catch(e){} return null; }
+
+  // ── servicios por tipo: ajustar la cantidad conservando nombres y papeles ──
+  function ajustarCantidad(tid, n){
+    var t=tipoDe(tid); n=Math.max(0, Math.min(t.max, parseInt(n,10)||0));
+    var L=deTipo(tid);
+    if(L.length<n){ var base=(t.desde!=null?+t.desde:1); for(var i=L.length;i<n;i++){ var s={id:nuevoId(), tipo:tid, nombre:t.pref+(n>1||base!==1?' '+(base+i):''), rol:'M', maestro:null, actual:null}; D.servicios.push(s); } }
+    else if(L.length>n){
+      var fuera=L.slice(n).map(function(s){ return s.id; });
+      D.servicios=D.servicios.filter(function(s){ return fuera.indexOf(s.id)<0; });
+      D.servicios.forEach(function(s){ if(fuera.indexOf(s.maestro)>=0){ s.rol='M'; s.maestro=null; } });
+    }
+    t.n=n; sincronizarOrden();
+  }
+  // orden de los maestros de cada tipo (para repartir los huecos); los nuevos al final
+  function sincronizarOrden(){
+    D.tipos.forEach(function(t){
+      var M=deTipo(t.id).filter(function(s){ return s.rol==='M'; }).map(function(s){ return s.id; });
+      t.orden=(t.orden||[]).filter(function(id){ return M.indexOf(id)>=0; });
+      M.forEach(function(id){ if(t.orden.indexOf(id)<0) t.orden.push(id); });
+      t.n=deTipo(t.id).length;
+    });
+  }
+
+  // ══════════════════════ CÁLCULO ══════════════════════
+  /* 2026-11-10 — con grupos creados a mano («MURAL VERDURA», «MURAL CARNES»…), los del MISMO mueble y modo
+     comparten una sola secuencia de horarios, como en el informe de referencia (verdura 00:00, lácteos 00:15…
+     carnes 02:45; islas 1, 2, 3… h): primer arranque, separación, maestros por grupo y duración son de la
+     cadena (D.cadenas); Fdn/dit o días semanales, de cada grupo. Los grupos siguen el orden de la lista. */
+  function claveCad(t){ return (t.mueble||t.id)+':'+t.modo; }
+  function cadena(t){
+    D.cadenas=D.cadenas||{}; var k=claveCad(t);
+    if(!D.cadenas[k]){ var b=preset(t.mueble); D.cadenas[k]={ini:t.ini||b.ini, sep:(t.sep!=null?t.sep:b.sep), porSlot:t.porSlot||b.porSlot, dur:t.dur||b.dur, nombre:(b.id==='otro'?t.nombre:b.nombre)}; }
+    return D.cadenas[k];
+  }
+  function cadenas(){   // [{clave, cad, grupos:[t…]}] en el orden de la lista
+    var out=[], idx={};
+    D.tipos.forEach(function(t){ var k=claveCad(t); if(idx[k]==null){ idx[k]=out.length; out.push({clave:k, cad:cadena(t), grupos:[]}); } out[idx[k]].grupos.push(t); });
+    return out;
+  }
+  /* 2026-11-10 — Rafa: «supuestamente el programa es el que tiene que distribuirlo de la mejor manera posible».
+     REPARTO AUTOMÁTICO (por defecto): para cada maestro se prueban todos los huecos de su mueble (primer arranque
+     + q·separación, dentro de su ventana y con como mucho «maestros por hueco») y se elige el que deja MENOS
+     desescarches a la vez en la franja de 30 min más cargada, teniendo en cuenta todo el día (repeticiones cada
+     24/Fdn h) y todos los muebles. A igualdad, se respeta el orden de los grupos y después la suma de carga.
+     Los que llevan hueco u hora a mano se colocan primero y no se mueven. Primero los que más se repiten. */
+  function _cmp(a,b){ for(var i=0;i<a.length;i++){ if(a[i]!==b[i]) return a[i]-b[i]; } return 0; }
+  /* 2026-11-10 (2) — mejor reparto: tras el primer reparto (voraz) se prueba a mover cada maestro de hueco mientras
+     mejore: 1.º la franja más cargada, 2.º cuántas franjas están en ese máximo, 3.º lo desigual (suma de cuadrados),
+     4.º el orden de los grupos. «🔀 Redistribuir» repite todo con muchos órdenes distintos y guarda el mejor
+     (D._autoCache, ligado a la estructura actual: si cambian servicios o ajustes, se vuelve a calcular). */
+  function _items(){
+    var porSrv=(D.cargaModo==='servicios'), items=[];
+    cadenas().forEach(function(C, ci){
+      var cad=C.cad, ps=Math.max(1,parseInt(cad.porSlot,10)||1), sep=Math.max(1,parseFloat(cad.sep)||15), ini=aMin(cad.ini);
+      C.grupos.forEach(function(t, gi){
+        var sem=(t.modo==='semanal'), n=sem?1:Math.max(1,parseInt(t.fdn,10)||1), P=sem?1440:1440/n;
+        var ven=(cad.ventanaH>0)?Math.min(cad.ventanaH*60+1, sem?1440:P):(sem?241:P);
+        t.orden.map(svc).filter(Boolean).forEach(function(m, mi){
+          var w=porSrv?1+D.servicios.filter(function(e){ return e.rol==='E'&&e.maestro===m.id; }).length:1;
+          var it={m:m, k:C.clave, ci:ci, gi:gi, mi:mi, n:n, P:P, w:w, ps:ps, sep:sep, ini:ini, qmax:Math.max(1,Math.floor((ven-1)/sep)+1), pos:items.length};
+          if(m.horaManual){ it.fijo=true; it.st=aMin(m.horaManual); } else if(m.slotManual){ it.fijo=true; it.q=parseInt(m.slotManual,10)-1; it.st=ini+it.q*sep; }
+          items.push(it);
+        });
+      });
+    });
+    return items;
+  }
+  function _firma(){ return JSON.stringify([D.cargaModo||'', D.cadenas||{}, D.tipos.map(function(t){ return [t.id,t.modo,t.fdn,t.fd1,t.fd2,t.orden]; }),
+    D.servicios.map(function(x){ return [x.id,x.rol,x.maestro,x.slotManual||'',x.horaManual||'']; })]); }
+  function _franjas(it, st){ var f=[]; for(var i=0;i<it.n;i++) f.push(Math.floor((((st+i*it.P)%1440)+1440)%1440/30)%48); return f; }
+  function _obj(load){ var mx=0,c=0,sq=0; for(var i=0;i<48;i++){ var v=load[i]; if(v>mx){ mx=v; c=1; } else if(v===mx) c++; sq+=v*v; } return [mx,c,sq]; }
+  function _resolver(items, orden){
+    var load=new Array(48).fill(0), usado={}, out={}, lastQ={};
+    var add=function(it,st,sg){ _franjas(it,st).forEach(function(f){ load[f]+=sg*it.w; }); };
+    items.forEach(function(it){ if(it.fijo){ add(it,it.st,1); if(it.q!=null){ var U=usado[it.k]=usado[it.k]||{}; U[it.q]=(U[it.q]||0)+1; } } });
+    var libres=orden.filter(function(it){ return !it.fijo; });
+    // 1) voraz
+    libres.forEach(function(it){
+      var U=usado[it.k]=usado[it.k]||{}, lq=(lastQ[it.k]==null?0:lastQ[it.k]), best=null;
+      for(var q=0;q<it.qmax;q++){ if((U[q]||0)>=it.ps) continue; var st=it.ini+q*it.sep, mx=0, sum=0;
+        _franjas(it,st).forEach(function(f){ var v=load[f]+it.w; if(v>mx) mx=v; sum+=v; });
+        var sc=[mx,(q>=lq)?(q-lq):(1000+lq-q),sum]; if(!best||_cmp(sc,best.sc)<0) best={q:q,sc:sc}; }
+      if(!best) best={q:it.qmax};
+      U[best.q]=(U[best.q]||0)+1; lastQ[it.k]=best.q; out[it.m.id]=best.q; add(it,it.ini+best.q*it.sep,1);
+    });
+    // 2) mejora local: mover de hueco mientras mejore el objetivo
+    for(var pasada=0; pasada<40; pasada++){
+      var mejoro=false;
+      libres.forEach(function(it){
+        var U=usado[it.k], q0=out[it.m.id]; add(it,it.ini+q0*it.sep,-1); U[q0]--;
+        var best={q:q0, sc:null};
+        for(var q=0;q<it.qmax;q++){ if(q!==q0&&(U[q]||0)>=it.ps) continue; add(it,it.ini+q*it.sep,1);
+          var sc=_obj(load).concat([Math.abs(q-q0)===0?0:1]); add(it,it.ini+q*it.sep,-1);
+          if(best.sc===null||_cmp(sc,best.sc)<0) best={q:q,sc:sc}; }
+        if(best.q!==q0) mejoro=true;
+        out[it.m.id]=best.q; U[best.q]=(U[best.q]||0)+1; add(it,it.ini+best.q*it.sep,1);
+      });
+      if(!mejoro) break;
+    }
+    return {slots:out, obj:_obj(load)};
+  }
+  function repartoAuto(){
+    var f=_firma();
+    if(D._autoCache && D._autoCache.firma===f) return D._autoCache.slots;
+    // 2026-11-10 — «que lo haga sola»: primero, si se puede, relaja las reglas que no dejan margen; luego, la búsqueda a fondo
+    if(D.mejoraAuto!==false) mejorarReglas();
+    redistribuir(150);
+    return D._autoCache.slots;
+  }
+  /* 2026-11-10 — Rafa: «esta herramienta se destina a gente sin conocimientos, debe hacerlo sola… si sabes hacerlo
+     mejor no te fijes en mis reglas, hazlo y dime cómo». Muebles SIN margen = tantos huecos como maestros con su
+     separación y ventana. Se prueba a relajar sus reglas (menos separación: 1/2, 1/3, 30 o 15 min; en los semanales,
+     1–2 h más de ventana), de una en una y hasta 3, quedándose con el cambio más pequeño que baje la franja más
+     cargada (o el nº de franjas en ese máximo). Se aplica y se apunta en D.ajustes (con el valor original) para
+     explicarlo y poder volver atrás. No se tocan los valores que el usuario ha cambiado a mano en el paso 4. */
+  function huecosJustos(){
+    var por={}; _items().forEach(function(it){ if(it.fijo) return; var x=por[it.k]=por[it.k]||{n:0, cap:it.qmax*it.ps}; x.n++; });
+    return Object.keys(por).filter(function(k){ return por[k].n>=por[k].cap; });
+  }
+  function _evaluar(n){ var g=D._autoCache; D._autoCache=null; var o=redistribuir(n||25); D._autoCache=g; return o; }
+  function mejorarReglas(){
+    D.ajustes=D.ajustes||{};
+    var cur=_evaluar(40);
+    for(var vuelta=0; vuelta<3; vuelta++){
+      var mejor=null;
+      huecosJustos().forEach(function(k){
+        var cad=(D.cadenas||{})[k]; if(!cad) return; var usr=cad._usr||{}, sem=/:semanal$/.test(k);
+        var prueba=function(campo, v){ var had=(campo in cad), old=cad[campo]; cad[campo]=v; var o=_evaluar(); if(had) cad[campo]=old; else delete cad[campo];
+          if((o[0]<cur[0]||(o[0]===cur[0]&&o[1]<cur[1])) && (!mejor||_cmp(o,mejor.o)<0)) mejor={k:k, campo:campo, a:v, o:o}; };
+        if(!usr.sep){ var cands=[]; [cad.sep/2, cad.sep/3, 30, 15].forEach(function(v){ v=Math.round(v/5)*5; if(v>=15&&v<cad.sep&&cands.indexOf(v)<0) cands.push(v); }); cands.forEach(function(v){ prueba('sep', v); }); }
+        if(sem && !usr.ventanaH){ var vh=cad.ventanaH||4; [vh+1, vh+2].forEach(function(v){ prueba('ventanaH', v); }); }
+      });
+      if(!mejor) break;
+      var cad=D.cadenas[mejor.k], aj=D.ajustes[mejor.k]=D.ajustes[mejor.k]||{};
+      if(!(mejor.campo in aj)) aj[mejor.campo]=(mejor.campo in cad)?cad[mejor.campo]:(mejor.campo==='ventanaH'?4:null);
+      cad[mejor.campo]=mejor.a; cur=mejor.o;
+    }
+  }
+  function textoAjustes(){
+    var out=[]; Object.keys(D.ajustes||{}).forEach(function(k){ var cad=(D.cadenas||{})[k]||{}, aj=D.ajustes[k];
+      Object.keys(aj).forEach(function(c){ if(cad[c]===aj[c]) return; out.push((cad.nombre||k)+': '+(c==='sep'?'separación entre huecos '+aj[c]+' → '+cad[c]+' min':'ventana de arranque '+aj[c]+' → '+cad[c]+' h')); }); });
+    return out;
+  }
+  // «🔀 Redistribuir»: muchos órdenes de partida distintos; se queda el mejor y se guarda en la plantilla
+  function redistribuir(intentos){
+    var items=_items(), base=items.slice().sort(function(a,b){ return (b.n-a.n)||(a.ci-b.ci)||(a.gi-b.gi)||(a.mi-b.mi); });
+    var best=_resolver(items, base), semilla=12345;
+    var rnd=function(){ semilla=(semilla*1103515245+12345)&0x7fffffff; return semilla/0x7fffffff; };
+    for(var k=0;k<(intentos||150);k++){
+      var ord=base.slice(); for(var i=ord.length-1;i>0;i--){ var j=Math.floor(rnd()*(i+1)); var x=ord[i]; ord[i]=ord[j]; ord[j]=x; }
+      ord.sort(function(a,b){ return b.n-a.n; });   // primero los que más se repiten, mezclados entre sí
+      var r=_resolver(items, ord); if(_cmp(r.obj,best.obj)<0) best=r;
+    }
+    D._autoCache={firma:_firma(), slots:best.slots, obj:best.obj};
+    return best.obj;
+  }
+  function calcular(){
+    sincronizarOrden();
+    var res={porSvc:{}, grupos:[], avisos:[]};
+    var _auto=(D.reparto!=='orden')?repartoAuto():null;
+    cadenas().forEach(function(C){ var kCad=0;
+    C.grupos.forEach(function(t, gi){
+      var cad=C.cad;
+      // 2026-11-10 — Rafa (7026): «leche fresca» y «charcutería 1» caían juntas: con esta casilla cada grupo empieza en un hueco nuevo
+      if(cad.huecoNuevo && gi>0){ var _ps=Math.max(1,parseInt(cad.porSlot,10)||1); if(kCad%_ps) kCad+=_ps-(kCad%_ps); }
+      t.ini=cad.ini; t.sep=cad.sep; t.porSlot=cad.porSlot; t.dur=cad.dur;   // el informe los lee del grupo
+      var M=t.orden.map(svc).filter(Boolean), porSlot=Math.max(1,parseInt(cad.porSlot,10)||1), sep=parseFloat(cad.sep)||0, ini=aMin(cad.ini);
+      var fdn=Math.max(0,parseInt(t.fdn,10)||0), dit=parseFloat(t.dit)||0;
+      if(t.modo==='diario' && fdn<1 && M.length) res.avisos.push(t.nombre+': Fdn = 0 → los maestros no tendrían desescarches diarios.');
+      M.forEach(function(m){ var k=kCad++;
+        var slot=(m.slotManual!=null&&m.slotManual!=='')?(parseInt(m.slotManual,10)-1):((_auto&&_auto[m.id]!=null)?_auto[m.id]:Math.floor(k/porSlot));   // slotManual: 1, 2, 3… (vacío = automático)
+        var inicio=(m.horaManual)?aMin(m.horaManual):(ini+slot*sep)%1440;
+        var esclavos=D.servicios.filter(function(s){ return s.rol==='E' && s.maestro===m.id; });
+        var p, horas=[];
+        if(t.modo==='semanal'){
+          p={dCt:4, dOH:0, dit:dit, Fdn:0, d1H:24, d1n:0, Fd1:+t.fd1, Fd2:+t.fd2, F1H:Math.floor(inicio/60), F1n:inicio%60};
+          horas=[inicio];
+        } else {
+          p={dCt:4, dOH:0, dit:dit, Fdn:fdn, d1H:Math.floor(inicio/60), d1n:inicio%60, Fd1:7, Fd2:7, F1H:null, F1n:null};
+          for(var i=0;i<Math.max(1,fdn);i++) horas.push((inicio+i*1440/Math.max(1,fdn))%1440);
+        }
+        res.porSvc[m.id]={rol:'M', tipo:t, p:p, horas:horas, inicio:inicio, slot:slot};
+        esclavos.forEach(function(e){
+          res.porSvc[e.id]={rol:'E', tipo:t, maestro:m, p:{dCt:2, dOH:0, dit:dit+1, Fdn:0, d1H:null, d1n:null, Fd1:7, Fd2:7, F1H:null, F1n:null}, horas:horas.slice(), inicio:inicio, slot:slot};
+        });
+        res.grupos.push({tipo:t, maestro:m, esclavos:esclavos, inicio:inicio, horas:horas, slot:slot,
+          etiqueta:(esclavos.length?'G. ':'')+m.nombre+(esclavos.length?' + '+esclavos.map(function(e){return e.nombre;}).join(' + '):'')});
+      });
+      deTipo(t.id).forEach(function(s){ if(s.rol==='E' && !(s.maestro && svc(s.maestro) && svc(s.maestro).rol==='M')) res.avisos.push(s.nombre+': está como esclavo pero sin maestro válido.'); });
+    });
+    });
+    // carga por franjas de 30 min (día laborable; las islas semanales solo sus días)
+    /* 2026-11-10 — Rafa (7026): el aviso daba 9 a la vez contando servicios; el gráfico del informe de referencia
+       cuenta GRUPOS (maestro con sus esclavos = 1: de 00:00 a 00:30 salen 4) y suma las islas el día que
+       desescarchan (01:00 → 6). Por defecto así; se puede elegir contar servicios. */
+    var porSrv=(D.cargaModo==='servicios');
+    var carga=new Array(48).fill(0), cargaSem=new Array(48).fill(0);
+    Object.keys(res.porSvc).forEach(function(id){ var r=res.porSvc[id]; if(!porSrv && r.rol!=='M') return;
+      r.horas.forEach(function(h){ var f=Math.floor(h/30)%48; carga[f]++; if(r.tipo.modo==='semanal') cargaSem[f]++; }); });
+    res.carga=carga; res.cargaSem=cargaSem;
+    var mx=Math.max.apply(null,carga), u=D.umbrales||{medio:5,alta:7};
+    if(mx>=u.alta) res.avisos.push('Hay franjas de 30 min con '+mx+' '+(porSrv?'servicios':'grupos')+' desescarchando a la vez (alta, ≥ '+u.alta+'): conviene separar más los grupos.');
+    // observaciones con los valores actuales (si se han leído del Televis)
+    D.servicios.forEach(function(s){
+      var a=s.actual; if(!a) return; var r=res.porSvc[s.id];
+      if(+a.dit===0) res.avisos.push(s.nombre+': dit = 0 ahora mismo → no desescarcha nunca.');
+      if(r&&r.rol==='M'&&r.tipo.modo==='diario'&&+a.dCt===4&&+a.d1H===24) res.avisos.push(s.nombre+': d1H = 24 ahora mismo → sin hora de inicio de desescarche laborable.');
+      if(r&&r.rol==='M'&&r.tipo.modo==='semanal'&&(+a.F1H===24||a.F1H==null)) res.avisos.push(s.nombre+': hora de desescarche semanal (F1H) sin configurar ahora mismo.');
+    });
+    return res;
+  }
+
+  // ══════════════════════ GRÁFICO (canvas, fondo blanco) ══════════════════════
+  function dibujar(canvas, res){
+    var filas=[]; D.tipos.forEach(function(t){ var orden=t.orden.map(svc).filter(Boolean); orden.forEach(function(m){ filas.push(m); D.servicios.filter(function(e){ return e.rol==='E'&&e.maestro===m.id; }).forEach(function(e){ filas.push(e); }); }); });
+    var RH=15, IZQ=210, DER=20, TOP=72, W=1400, gW=W-IZQ-DER, hG=filas.length*RH, CH=190, H=TOP+hG+40+CH+50;
+    canvas.width=W; canvas.height=H;
+    var c=canvas.getContext('2d'); c.fillStyle='#fff'; c.fillRect(0,0,W,H);
+    c.fillStyle='#1F2937'; c.font='bold 15px Arial'; c.fillText('Distribución de desescarches por servicio — '+(D.cod?D.cod+' ':'')+(D.nombre||''),IZQ,20);
+    // leyenda
+    var lx=IZQ; c.font='12px Arial';
+    D.tipos.filter(function(t){ return t.orden.length; }).forEach(function(t){ c.fillStyle=t.color; c.fillRect(lx,30,12,10); c.fillStyle='#374151'; var tx=t.nombre+(t.modo==='semanal'?' ('+diasTxt(t)+')':' (cada '+(Math.round(1440/Math.max(1,t.fdn))/60)+' h)'); c.fillText(tx,lx+16,39); lx+=c.measureText(tx).width+34; });
+    c.fillStyle='#6B7280'; c.fillText('Barra llena = maestro · barra clara = esclavo',lx,39);
+    var x=function(min){ return IZQ+gW*min/1440; };
+    // rejilla horaria
+    c.strokeStyle='#E5E7EB'; c.lineWidth=1; c.font='10px Arial'; c.fillStyle='#6B7280';
+    for(var h=0;h<=24;h++){ var xx=x(h*60); c.beginPath(); c.moveTo(xx,TOP-6); c.lineTo(xx,TOP+hG); c.stroke(); if(h<24) c.fillText(String(h).padStart(2,'0')+':00', xx+2, TOP-8); }
+    filas.forEach(function(s,i){
+      var r=res.porSvc[s.id]; var y=TOP+i*RH; if(i%2===0){ c.fillStyle='#F9FAFB'; c.fillRect(IZQ,y,gW,RH); }
+      c.fillStyle=(r&&r.rol==='E')?'#6B7280':'#111827'; c.font=(r&&r.rol==='E'?'':'bold ')+'10px Arial';
+      c.fillText(((r&&r.rol==='E')?'   ↳ ':'')+s.nombre, 6, y+RH-4);
+      if(!r) return; var t=r.tipo, dur=parseFloat(t.dur)||30;
+      r.horas.forEach(function(hm){ c.fillStyle=t.color; c.globalAlpha=(r.rol==='E')?0.45:1; var w=Math.max(3,gW*dur/1440);
+        c.fillRect(x(hm), y+2, w, RH-4); if(hm+dur>1440) c.fillRect(x(0), y+2, gW*(hm+dur-1440)/1440, RH-4); c.globalAlpha=1;
+        if(t.modo==='semanal'){ c.fillStyle='#991B1B'; c.font='9px Arial'; c.fillText(diasTxt(t,true,'+'), x(hm)+w+3, y+RH-4); } });
+    });
+    // carga por franjas
+    var y0=TOP+hG+40, u=D.umbrales||{medio:5,alta:7}, mx=Math.max(u.alta+1, Math.max.apply(null,res.carga)+1);
+    c.fillStyle='#1F2937'; c.font='bold 13px Arial'; c.fillText((D.cargaModo==='servicios'?'Servicios':'Grupos (maestro + esclavos)')+' que empiezan a desescarchar en cada franja de 30 min', IZQ, y0-10);
+    c.strokeStyle='#D1D5DB'; c.beginPath(); c.moveTo(IZQ,y0+CH); c.lineTo(IZQ+gW,y0+CH); c.stroke();
+    var bw=gW/48;
+    res.carga.forEach(function(v,i){
+      var col=v>=u.alta?'#C0392B':(v>=u.medio?'#E67E22':'#27AE60'); var bh=CH*v/mx;
+      c.fillStyle=col; c.fillRect(IZQ+i*bw+1, y0+CH-bh, bw-2, bh);
+      if(v){ c.fillStyle='#374151'; c.font='9px Arial'; c.fillText(String(v), IZQ+i*bw+bw/2-3, y0+CH-bh-3); }
+      if(res.cargaSem[i]){ c.fillStyle='#991B1B'; c.font='9px Arial'; c.fillText('isla', IZQ+i*bw+bw/2-7, y0+CH+12); }
+    });
+    c.fillStyle='#6B7280'; c.font='10px Arial';
+    for(var hh=0;hh<24;hh+=2) c.fillText(String(hh).padStart(2,'0')+':00', IZQ+hh*2*bw, y0+CH+26);
+    c.fillText('Verde < '+u.medio+' · naranja '+u.medio+(u.alta-1>u.medio?'–'+(u.alta-1):'')+' · rojo ≥ '+u.alta+'   ·   «isla» = incluye islas semanales (los días que desescarchan)', IZQ, y0+CH+42);
+  }
+
+  // ══════════════════════ PANTALLA ══════════════════════
+  var IN='background:var(--bg);border:1px solid var(--bd);color:var(--tx);border-radius:6px;padding:4px 7px;font-size:13px;font-family:inherit;';
+  function caja(t,h){ return '<div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;margin-bottom:12px;">'+(t?'<div style="font-weight:700;font-size:15px;margin-bottom:8px;">'+t+'</div>':'')+'<div class="des-cuerpo">'+h+'</div></div>'; }
+  function pintar(){
+    var root=document.getElementById('des-root'); if(!root||!D) return;
+    var h='<div class="des-barra" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">'+PASOS.map(function(p,i){
+      return '<button class="tb tb-sm'+(i===paso?'':' tb-gh')+'" onclick="desPaso('+i+')">'+p+'</button>'; }).join('')
+      +'<span style="flex:1"></span><button class="tb tb-sm tb-gh" onclick="desNuevo()" title="Empezar una programación nueva">＋ Nueva</button>'
+      +'<button class="tb tb-sm tb-gh" onclick="desEjemplo()" title="Carga una instalación de ejemplo (25 grupos de murales, vitrinas, armarios, cámaras e islas) para ver cómo funciona">📋 Ejemplo</button>'
+      +(HUB?'<button class="tb tb-sm tb-gh" onclick="desAbrirLista()" title="Programaciones guardadas en la base de datos">📂 Abrir (BD)</button>'
+           +'<button class="tb tb-sm" onclick="desGuardar()" title="Guarda en la base de datos (y en este navegador)">💾 Guardar (BD)</button>':'')
+      +'<button class="tb tb-sm tb-gh" onclick="desAbrirArchivo()" title="Abrir una programación guardada en archivo (.json)">📂 Abrir archivo</button>'
+      +'<button class="tb tb-sm tb-gh" onclick="desGuardarArchivo()" title="Guardar la programación en un archivo (.json) para seguir otro día o pasarla">💾 Guardar archivo</button></div>'
+      +'<div id="des-lista"></div>';
+    h+=[p1,p2,p3,p4,p5][paso]();
+    h+='<div style="display:flex;justify-content:space-between;margin-top:6px;">'
+      +(paso>0?'<button class="tb tb-sm tb-gh" onclick="desPaso('+(paso-1)+')">← Anterior</button>':'<span></span>')
+      +(paso<4?'<button class="tb tb-sm" onclick="desPaso('+(paso+1)+')">Siguiente →</button>':'<span></span>')+'</div>';
+    root.innerHTML=h;
+    if(paso===4){ var cv=document.getElementById('des-canvas'); if(cv) dibujar(cv, calcular()); }
+    guardarBorrador();
+  }
+  // 1 · Centro
+  function p1(){
+    var cents=[]; try{ cents=((HUB&&HUB.TG_CENTROS_DEFAULT)||[]).slice(); }catch(e){}
+    var dl='<datalist id="des-centros">'+cents.map(function(c){ return '<option value="'+esc(c.id)+'">'+esc(c.nombre||'')+'</option>'; }).join('')+'</datalist>';
+    var hayTG=!!(hubTG()&&hubTG().equipos&&hubTG().equipos.length);
+    return caja('Centro y datos del informe',
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">'
+      +'<label>Código de centro<br><input list="des-centros" value="'+esc(D.cod)+'" oninput="desCampo(\'cod\',this.value);desAutoNombre(this.value)" style="'+IN+'width:100%;"></label>'+dl
+      +'<label>Nombre<br><input id="des-nombre" value="'+esc(D.nombre)+'" oninput="desCampo(\'nombre\',this.value)" style="'+IN+'width:100%;"></label>'
+      +'<label>Fecha de la programación<br><input type="date" value="'+esc(D.fecha)+'" onchange="desCampo(\'fecha\',this.value)" style="'+IN+'width:100%;"></label>'
+      +'<label>Controladores<br><input value="'+esc(D.controlador)+'" oninput="desCampo(\'controlador\',this.value)" style="'+IN+'width:100%;"></label></div>'
+      +'<div style="margin-top:10px;"><label>Observaciones para el informe (salen en rojo, para revisarlas)<br><textarea oninput="desCampo(\'obs\',this.value)" rows="3" style="'+IN+'width:100%;">'+esc(D.obs)+'</textarea></label></div>')
+      +(!HUB?'':caja('Importar del Televis conectado',
+        hayTG?('<div style="font-size:13px;color:var(--mu);margin-bottom:6px;">Hay '+hubTG().equipos.length+' equipos cargados en Televis. Se crean los servicios RTX / RTN / V800 por tipo (según el nombre) y se pueden leer sus parámetros de desescarche actuales para el informe («antes → después»).</div>'
+          +'<button class="tb tb-sm" onclick="desImportarTG()">📡 Crear los servicios desde el Televis</button> <button class="tb tb-sm tb-gh" onclick="desLeerActuales()">📥 Leer parámetros actuales (dCt, dit, Fdn, d1H…)</button> <span id="des-lect" style="font-size:13px;color:var(--mu);"></span>')
+          :'<div style="font-size:13px;color:var(--mu);">Conéctate a un centro en «Televis Go» y carga sus equipos para crear los servicios con sus nombres reales y leer sus parámetros actuales. Si no, se crean a mano en el paso 2.</div>'));
+  }
+  // 2 · Servicios — formulario de alta por grupos
+  function p2(){
+    var opt=function(v,txt,sel){ return '<option value="'+esc(v)+'"'+(String(v)===String(sel)?' selected':'')+'>'+esc(txt)+'</option>'; };
+    var cuantosOpts=(FORM.modo==='semanal'?[[1,'1 a la semana'],[2,'2 a la semana']]:[1,2,3,4,6,8,12].map(function(n){ return [n, n+' al día (cada '+(24/n)+' h)']; }));
+    if(!cuantosOpts.some(function(o){ return +o[0]===+FORM.cuantos; })) FORM.cuantos=cuantosOpts[cuantosOpts.length>4?5:cuantosOpts.length-1][0];
+    var cantOpts=[]; for(var n=1;n<=40;n++) cantOpts.push(n);
+    var lab=function(t,h){ return '<label style="display:flex;flex-direction:column;gap:3px;">'+t+h+'</label>'; };
+    var form='<div class="des-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">'
+      +lab('Mueble','<select onchange="desForm(\'mueble\',this.value)" style="'+IN+'">'+TIPOS_DEF.map(function(b){ return opt(b.id,b.nombre.replace(' semanales',''),FORM.mueble); }).join('')+'</select>')
+      +lab('Nombre de los servicios','<input value="'+esc(FORM.nombre)+'" oninput="desForm(\'nombre\',this.value,1)" style="'+IN+'width:190px;" placeholder="p. ej. MURAL VERDURA">')
+      +lab('Positivo / negativo','<select onchange="desForm(\'fam\',this.value)" style="'+IN+'">'+opt('pos','Positivo',FORM.fam)+opt('neg','Negativo / cámara',FORM.fam)+'</select>')
+      +lab('Desescarche','<select onchange="desForm(\'modo\',this.value)" style="'+IN+'">'+opt('diario','Al día',FORM.modo)+opt('semanal','A la semana',FORM.modo)+'</select>')
+      +lab('Cuántos desescarches','<select onchange="desForm(\'cuantos\',this.value)" style="'+IN+'">'+cuantosOpts.map(function(o){ return opt(o[0],o[1],FORM.cuantos); }).join('')+'</select>')
+      +lab('Cantidad de servicios','<select onchange="desForm(\'cantidad\',this.value)" style="'+IN+'">'+cantOpts.map(function(n){ return opt(n,n,FORM.cantidad); }).join('')+'</select>')
+      +lab('Numerar desde','<input type="number" min="0" value="'+esc(FORM.desde)+'" oninput="desForm(\'desde\',this.value,1)" style="'+IN+'width:70px;">')
+      +'<button class="tb" onclick="desCrearGrupo()" style="height:32px;">＋ Crear</button></div>'
+      +'<div style="font-size:12px;color:var(--mu);margin-top:6px;">Vista previa: '+esc((function(){ var a=[]; for(var k=0;k<Math.min(3,FORM.cantidad);k++) a.push(FORM.nombre+(FORM.cantidad>1||+FORM.desde!==1?' '+((+FORM.desde||0)+k):'')); return a.join(', ')+(FORM.cantidad>3?' … ('+FORM.cantidad+')':''); })())+'. Al elegir el mueble se rellenan sus valores típicos; los horarios se ajustan en el paso 4.</div>';
+    var tot=D.servicios.length;
+    var lista=D.tipos.map(function(t){
+      var L=deTipo(t.id);
+      return '<tr style="border-top:1px solid var(--bd);"><td style="padding:5px;"><span style="display:inline-block;width:10px;height:10px;background:'+t.color+';border-radius:2px;margin-right:6px;"></span><input value="'+esc(t.nombre)+'" oninput="desTipo(\''+t.id+'\',\'nombre\',this.value)" style="'+IN+'width:170px;"></td>'
+        +'<td>'+(t.fam==='pos'?'Positivo':'Negativo / cámara')+'</td>'
+        +'<td>'+(t.modo==='semanal'?(t.fd2<7?'2':'1')+' a la semana':t.fdn+' al día')+'</td>'
+        +'<td><input type="number" min="0" max="'+t.max+'" value="'+L.length+'" onchange="desCantidad(\''+t.id+'\',this.value)" style="'+IN+'width:65px;"></td>'
+        +'<td><details><summary style="cursor:pointer;color:var(--mu);">✏ nombres</summary><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 8px;margin-top:4px;">'
+          +L.map(function(x){ return '<input value="'+esc(x.nombre)+'" oninput="desNombre(\''+x.id+'\',this.value)" style="'+IN+'">'; }).join('')+'</div></details></td>'
+        +'<td style="text-align:right;"><button class="tb tb-sm tb-gh" style="color:#ef4444;" onclick="desBorrarGrupo(\''+t.id+'\')" title="Quitar este grupo y sus servicios">🗑</button></td></tr>';
+    }).join('');
+    return caja('Añadir servicios', form)
+      +caja('Servicios creados <span style="font-weight:400;color:var(--mu);font-size:13px;">· '+tot+' servicio(s) en '+D.tipos.length+' grupo(s)</span>',
+        D.tipos.length?'<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="color:var(--mu);text-align:left;"><th>Grupo</th><th>Familia</th><th>Desescarches</th><th>Cantidad</th><th>Nombres</th><th></th></tr></thead><tbody>'+lista+'</tbody></table>'
+          +'<div style="font-size:12px;color:var(--mu);margin-top:6px;">Cuando estén todos, pasa al paso 3 para decir cuáles son maestros y cuáles esclavos.</div>'
+          :'<div style="font-size:13px;color:var(--mu);">Todavía no hay servicios. Rellena la fila de arriba y pulsa «＋ Crear» (p. ej. Mural · «MURAL VERDURA» · Positivo · Al día · 8 · 4), o pulsa <a href="#" onclick="event.preventDefault();desEjemplo()" style="color:var(--ac);">📋 Ejemplo</a> para ver una tienda completa ya hecha.</div>');
+  }
+  // 3 · Maestros y esclavos
+  function p3(){
+    var bloques=D.tipos.filter(function(t){ return deTipo(t.id).length; }).map(function(t){
+      var L=deTipo(t.id), M=L.filter(function(s){ return s.rol==='M'; });
+      return caja(esc(t.nombre)+' <span style="font-weight:400;color:var(--mu);font-size:13px;">· '+M.length+' maestro(s) · '+(L.length-M.length)+' esclavo(s)</span>',
+        '<div style="margin-bottom:6px;"><button class="tb tb-sm tb-gh" onclick="desEmparejar(\''+t.id+'\',2)">Emparejar de 2 en 2 (1→2, 3→4…)</button> <button class="tb tb-sm tb-gh" onclick="desEmparejar(\''+t.id+'\',3)">De 3 en 3</button> <button class="tb tb-sm tb-gh" onclick="desEmparejar(\''+t.id+'\',1)">Todos maestros</button></div>'
+        +'<table style="width:100%;border-collapse:collapse;font-size:13px;">'+L.map(function(s){
+          var opts=M.filter(function(m){ return m.id!==s.id; }).map(function(m){ return '<option value="'+m.id+'"'+(s.maestro===m.id?' selected':'')+'>'+esc(m.nombre)+'</option>'; }).join('');
+          return '<tr style="border-top:1px solid var(--bd);"><td style="padding:4px;">'+esc(s.nombre)+'</td>'
+            +'<td><select onchange="desRol(\''+s.id+'\',this.value)" style="'+IN+'"><option value="M"'+(s.rol==='M'?' selected':'')+'>Maestro</option><option value="E"'+(s.rol==='E'?' selected':'')+'>Esclavo</option></select></td>'
+            +'<td>'+(s.rol==='E'?'de <select onchange="desMaestro(\''+s.id+'\',this.value)" style="'+IN+'"><option value="">— elegir maestro —</option>'+opts+'</select>':'<span style="color:var(--mu);">'+(function(){ var es=L.filter(function(e){ return e.rol==='E'&&e.maestro===s.id; }); return es.length?'manda a: '+es.map(function(e){ return esc(e.nombre); }).join(', '):''; })()+'</span>')+'</td></tr>';
+        }).join('')+'</table>');
+    }).join('');
+    return bloques||caja('','Primero añade servicios en el paso 2.');
+  }
+  // 4 · Distribución — por mueble (cadena de horarios); dentro, cada grupo con su Fdn/dit o días
+  function p4(){
+    var res=calcular(), auto=(D.reparto!=='orden'), mxC=Math.max.apply(null,res.carga), u0=D.umbrales||{medio:6,alta:7};
+    var fijos=D.servicios.filter(function(x){ return x.slotManual||x.horaManual; }).length;
+    var cabReparto=caja('Reparto',
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;">'
+      +'<label style="display:flex;gap:6px;align-items:center;color:var(--tx);"><input type="radio" name="des-rep"'+(auto?' checked':'')+' onchange="desReparto(\'auto\')"> <b>Automático</b> — el programa busca los huecos con menos desescarches a la vez</label>'
+      +'<label style="display:flex;gap:6px;align-items:center;color:var(--tx);"><input type="radio" name="des-rep"'+(!auto?' checked':'')+' onchange="desReparto(\'orden\')"> Por orden — uno detrás de otro en el orden de la lista</label>'
+      +'<button class="tb tb-sm" onclick="desRedistribuir()" title="Busca a fondo el mejor reparto (prueba muchos repartos distintos) y lo deja guardado en la plantilla">🔀 Redistribuir</button>'
+      +(fijos?'<button class="tb tb-sm tb-gh" onclick="desQuitarFijos()" title="Vuelve a dejar en automático los huecos y horas puestos a mano">Quitar los '+fijos+' fijados a mano</button>':'')+'</div>'
+      +(function(){ if(!auto) return ''; var aj=textoAjustes();
+        return aj.length?'<div style="margin-top:8px;padding:8px 10px;border:1px solid #27AE60;border-radius:8px;background:rgba(39,174,96,.08);font-size:13px;">🤖 <b>Ajustado automáticamente para repartir mejor:</b> '+esc(aj.join(' · '))+'. <button class="tb tb-sm tb-gh" onclick="desVolverReglas()">↩ Volver a mis reglas</button></div>'
+          :'<div style="margin-top:6px;font-size:12px;color:var(--mu);">✓ Es el mejor reparto posible'+(D.mejoraAuto===false?' con tus reglas (ajuste automático desactivado: «🔀 Redistribuir» lo vuelve a activar)':'')+'.</div>'; })()
+      +'<div style="margin-top:6px;font-size:13px;">Franja de 30 min más cargada: <b style="color:'+(mxC>=u0.alta?'#C0392B':(mxC>=u0.medio?'#E67E22':'#27AE60'))+';">'+mxC+' '+(D.cargaModo==='servicios'?'servicios':'grupos')+' a la vez</b>'+(auto?' · un hueco o una hora puestos a mano se respetan y el resto se reparte alrededor':'')+'</div>');
+    var html=cadenas().map(function(C){
+      var cad=C.cad, k=C.clave;
+      var fc=function(c,v,ty,w,extra){ return '<input type="'+(ty||'number')+'" value="'+esc(v)+'" onchange="desCadena(\''+k+'\',\''+c+'\',this.value)" style="'+IN+'width:'+(w||70)+'px;" '+(extra||'')+'>'; };
+      var cab='<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;font-size:13px;">'
+        +'<label>Primer arranque<br>'+fc('ini',cad.ini,'time',100)+'</label>'
+        +'<label>Separación entre grupos (min)<br>'+fc('sep',cad.sep)+'</label>'
+        +'<label>Maestros a la vez (por hueco)<br>'+fc('porSlot',cad.porSlot,'number',60,'min="1" max="6"')+'</label>'
+        +'<label>Duración estimada (min, gráfico)<br>'+fc('dur',cad.dur)+'</label>'
+        +'<label title="Hasta cuántas horas después del primer arranque puede empezar el primer desescarche (vacío = todo el ciclo; islas 4 h = de 01:00 a 05:00)">Ventana de arranque (h)<br>'+fc('ventanaH',cad.ventanaH||'','number',70,'min="0" step="0.5" placeholder="'+(C.grupos[0].modo==='semanal'?'4':'ciclo')+'"')+'</label>'
+        +'<label style="display:flex;align-items:center;gap:5px;padding-bottom:6px;"><input type="checkbox"'+(cad.huecoNuevo?' checked':'')+' onchange="desCadena(\''+k+'\',\'huecoNuevo\',this.checked)"> cada grupo empieza en hueco nuevo</label></div>';
+      var gruposHtml=C.grupos.map(function(t,gi){
+        var f=function(c,v,w){ return '<input type="number" value="'+esc(v)+'" onchange="desTipo(\''+t.id+'\',\''+c+'\',this.value,1)" style="'+IN+'width:'+(w||60)+'px;">'; };
+        var diaSel=function(c){ return '<select onchange="desTipo(\''+t.id+'\',\''+c+'\',this.value,1)" style="'+IN+'">'+DIAS.map(function(d,i2){ return '<option value="'+i2+'"'+(+t[c]===i2?' selected':'')+'>'+d+'</option>'; }).join('')+'</select>'; };
+        var filas=t.orden.map(svc).filter(Boolean).map(function(m,kk){
+          var r=res.porSvc[m.id]; var es=D.servicios.filter(function(e){ return e.rol==='E'&&e.maestro===m.id; });
+          return '<tr style="border-top:1px solid var(--bd);"><td style="padding:3px 4px;white-space:nowrap;"><button class="tb tb-sm tb-gh" onclick="desMover(\''+t.id+'\','+kk+',-1)">▲</button><button class="tb tb-sm tb-gh" onclick="desMover(\''+t.id+'\','+kk+',1)">▼</button></td>'
+            +'<td><b>'+esc(m.nombre)+'</b>'+(es.length?' <span style="color:var(--mu);">+ '+es.map(function(e){ return esc(e.nombre); }).join(', ')+'</span>':'')+'</td>'
+            +'<td><select onchange="desHueco(\''+m.id+'\',this.value)" style="'+IN+'" title="Hueco de la secuencia (automático = el que le toca por orden)"><option value="">auto ('+(m.slotManual?'':'hueco ')+(r.slot+1)+')</option>'
+              +(function(){ var o=''; for(var q=1;q<=Math.max(24,r.slot+3);q++) o+='<option value="'+q+'"'+(+m.slotManual===q?' selected':'')+'>hueco '+q+' · '+hhmm(aMin(cad.ini)+(q-1)*(parseFloat(cad.sep)||0))+'</option>'; return o; })()+'</select></td>'
+            +'<td><input type="time" value="'+esc(m.horaManual||'')+'" onchange="desHora(\''+m.id+'\',this.value)" style="'+IN+'width:100px;" title="Fijar la hora a mano (vacío = la calculada)"> → <b style="color:var(--ac);">'+hhmm(r.inicio)+'</b></td>'
+            +'<td style="color:var(--mu);font-size:12px;">'+(t.modo==='semanal'?diasTxt(t):r.horas.map(hhmm).join(' · '))+'</td></tr>';
+        }).join('');
+        return '<div style="margin-top:10px;border-top:1px dashed var(--bd);padding-top:8px;">'
+          +'<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;font-size:13px;"><b style="font-size:14px;"><span style="display:inline-block;width:10px;height:10px;background:'+t.color+';border-radius:2px;margin-right:6px;"></span>'+esc(t.nombre)+'</b>'
+          +(C.grupos.length>1?'<span><button class="tb tb-sm tb-gh" onclick="desMoverGrupo(\''+t.id+'\',-1)" title="Este grupo antes en la secuencia">⇧</button><button class="tb tb-sm tb-gh" onclick="desMoverGrupo(\''+t.id+'\',1)" title="Este grupo después">⇩</button></span>':'')
+          +(t.modo==='diario'?'<label>Fdn (al día) '+f('fdn',t.fdn)+'</label>':'<label>1.er día '+diaSel('fd1')+'</label><label>2.º día '+diaSel('fd2')+'</label>')
+          +'<label>dit maestro (h) '+f('dit',t.dit)+'</label></div>'
+          +'<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:4px;">'+filas+'</table></div>';
+      }).join('');
+      return caja('❄️ '+esc(cad.nombre)+(C.grupos[0].modo==='semanal'?' (semanal)':'')+' <span style="font-weight:400;color:var(--mu);font-size:13px;">· '+C.grupos.length+' grupo(s) · huecos cada '+cad.sep+' min desde las '+esc(cad.ini)+', hasta '+cad.porSlot+' maestro(s) por hueco'+(auto?' · reparto automático':'')+'</span>',
+        cab+gruposHtml+'<div style="font-size:12px;color:var(--mu);margin-top:6px;">'+(auto?'Reparto automático: a igualdad de carga se respeta el orden de los grupos (⇧⇩) y de los maestros (▲▼). Un hueco o una hora a mano manda.':'Los grupos siguen uno detrás de otro en este orden (⇧⇩), y dentro de cada grupo los maestros (▲▼). Una hora a mano manda sobre la calculada.')+'</div>');
+    }).join('');
+    var u=D.umbrales||{medio:5,alta:7};
+    return cabReparto+(html||caja('','No hay maestros: revisa los pasos 2 y 3.'))
+      +caja('Aviso de carga','<div style="font-size:13px;margin-bottom:6px;">Contar: <select onchange="desCargaModo(this.value)" style="'+IN+'"><option value="grupos"'+(D.cargaModo!=='servicios'?' selected':'')+'>grupos (maestro + sus esclavos = 1)</option><option value="servicios"'+(D.cargaModo==='servicios'?' selected':'')+'>servicios (cada equipo)</option></select> · las islas semanales se suman (el día que desescarchan).</div><div style="font-size:13px;">Por franja de 30 min: naranja desde <input type="number" value="'+u.medio+'" onchange="desUmbral(\'medio\',this.value)" style="'+IN+'width:55px;"> desescarches a la vez y rojo desde <input type="number" value="'+u.alta+'" onchange="desUmbral(\'alta\',this.value)" style="'+IN+'width:55px;">.</div>')
+      +(res.avisos.length?caja('Avisos','<ul style="margin:0 0 0 18px;padding:0;color:#ef4444;font-size:13px;">'+res.avisos.map(function(a){ return '<li>'+esc(a)+'</li>'; }).join('')+'</ul>'):'');
+  }
+  // 5 · Resultado
+  function p5(){
+    var res=calcular();
+    return caja('Gráfico de distribución (24 h)','<div style="overflow-x:auto;background:#fff;border-radius:8px;"><canvas id="des-canvas" class="des-grafico"></canvas></div>')
+      +caja('Informe','<div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="tb tb-sm" onclick="desInforme(\'pdf\')">📄 Informe PDF</button><button class="tb tb-sm" onclick="desInforme(\'docx\')">📝 Informe Word</button><button class="tb tb-sm tb-gh" onclick="desInforme(\'html\')">🌐 HTML</button><button class="tb tb-sm tb-gh" onclick="desExcel()">📊 Tabla de parámetros ('+((window.XLSX||(HUB&&HUB.XLSX))?'Excel':'CSV')+')</button></div>'
+        +(HUB?'':'<div style="font-size:12px;color:var(--mu);margin-top:6px;">PDF: se abre el informe y el diálogo de imprimir → elige «Guardar como PDF».</div>'))
+      +caja('Cómo se ha repartido y por qué','<ul style="margin:0 0 0 18px;padding:0;font-size:13px;line-height:1.55;">'+explicacion(res).map(function(x){ return '<li>'+x+'</li>'; }).join('')+'</ul>')
+      +caja('Parámetros a programar', tablaCambios(res,false))
+      +(res.avisos.length?caja('Avisos','<ul style="margin:0 0 0 18px;padding:0;color:#ef4444;font-size:13px;">'+res.avisos.map(function(a){ return '<li>'+esc(a)+'</li>'; }).join('')+'</ul>'):'');
+  }
+  function explicacion(res){
+    var ud=(D.cargaModo==='servicios'?'servicios':'grupos (maestro con sus esclavos)'), mx=Math.max.apply(null,res.carga);
+    var nMx=res.carga.filter(function(v){ return v===mx; }).length, tot=res.carga.reduce(function(a,b){ return a+b; },0);
+    var porOrden=(function(){ if(D.reparto==='orden') return null; var r=D.reparto; D.reparto='orden'; var x=calcular(); D.reparto=r; return Math.max.apply(null,x.carga); })();
+    var L=[];
+    L.push('<b>Criterio:</b> que coincidan los menos desescarches posibles. Se cuentan los '+ud+' que empiezan a desescarchar en cada franja de 30 minutos a lo largo de las 24 h (cada uno se repite según su Fdn) y se busca que la franja más cargada sea la más baja posible; después, que haya pocas franjas en ese máximo y que el resto quede lo más igualado posible. Así la central no tiene que recuperar muchos muebles a la vez.');
+    L.push('<b>Cómo:</b> cada maestro se prueba en todos los huecos que permite su mueble (primer arranque, separación entre huecos, ventana y máximo de maestros por hueco) y se queda en el que menos carga, teniendo en cuenta todos los muebles juntos (murales, cámaras, vitrinas, armarios e islas). Se repite con muchos órdenes de partida distintos y se queda el mejor. Los esclavos desescarchan con su maestro (Link2) y no ocupan hueco propio.');
+    cadenas().forEach(function(C){ var cad=C.cad, g=C.grupos[0], nM=0; C.grupos.forEach(function(t){ nM+=t.orden.length; });
+      L.push('<b>'+esc(cad.nombre)+'</b> ('+nM+' maestro(s)): '+(g.modo==='semanal'?'desescarche semanal ('+diasTxt(g)+')':'cada '+(Math.round(1440/Math.max(1,g.fdn))/60)+' h')+'; huecos cada '+cad.sep+' min desde las '+esc(cad.ini)+(cad.ventanaH?' durante '+cad.ventanaH+' h':'')+', hasta '+cad.porSlot+' maestro(s) por hueco.'); });
+    var aj=textoAjustes();
+    if(aj.length) L.push('<b>Ajustes automáticos:</b> con las reglas iniciales había muebles sin margen (tantos huecos como maestros), así que se han relajado para repartir mejor: '+esc(aj.join('; '))+'.');
+    L.push('<b>Resultado:</b> coinciden como mucho <b>'+mx+'</b> '+ud+' a la vez ('+nMx+' franja(s) de 48 en ese máximo; media '+(Math.round(tot/48*10)/10)+' por franja)'+(porOrden!=null&&porOrden!==mx?'. Repartiendo por orden, uno detrás de otro, serían '+porOrden:'')+'.');
+    return L;
+  }
+  // tabla de cambios (pantalla e informe): actual → nuevo cuando se conoce el actual
+  function celda(a,n){ if(n==null) return '—'; if(a==null||a==='') return String(n); return (+a===+n)?String(n):(a+'→'+n); }
+  function tablaCambios(res, informe){
+    var TH=informe?'style="background:#1F6FA8;color:#fff;font-style:italic;padding:4px 6px;font-weight:600;text-align:left;"':'style="text-align:left;color:var(--mu);padding:4px;"';
+    var TD=informe?'style="padding:3px 6px;border-bottom:1px solid #ddd;"':'style="padding:3px 4px;border-top:1px solid var(--bd);"';
+    var out='';
+    [['pos','Positivos',['dCt','dOH','dit','Fdn','d1H','d1n']],['neg','Negativos y cámaras',PARAMS]].forEach(function(g){
+      var filas=[];
+      D.tipos.filter(function(t){ return t.fam===g[0]; }).forEach(function(t){ t.orden.map(svc).filter(Boolean).forEach(function(m){
+        [m].concat(D.servicios.filter(function(e){ return e.rol==='E'&&e.maestro===m.id; })).forEach(function(s){
+          var r=res.porSvc[s.id]; if(!r) return; var a=s.actual||{};
+          filas.push('<tr><td '+TD+'><b>'+esc(s.nombre)+'</b></td><td '+TD+'>'+(r.rol==='M'?(t.modo==='semanal'?'MAESTRO SEM.':'MAESTRO'):'ESCLAVO de '+esc(r.maestro.nombre))+'</td>'
+            +g[2].map(function(k){ var nv=r.p[k]; if(r.rol==='E'&&/^(d1H|d1n|F1H|F1n)$/.test(k)) nv=null; return '<td '+TD+'>'+celda(a[k],nv)+'</td>'; }).join('')+'</tr>');
+        });
+      }); });
+      if(filas.length) out+=(informe?'<h3 style="font-family:Arial;font-size:13px;margin:12px 0 4px;">'+g[1]+'</h3>':'<div style="font-weight:700;margin:6px 0 4px;">'+g[1]+'</div>')
+        +'<table style="width:100%;border-collapse:collapse;font-size:'+(informe?'10.5px;font-family:Arial':'13px')+';"><thead><tr><th '+TH+'>Equipo</th><th '+TH+'>Tipo</th>'+g[2].map(function(k){ return '<th '+TH+'>'+k+'</th>'; }).join('')+'</tr></thead><tbody>'+filas.join('')+'</tbody></table>';
+    });
+    return out||'Sin servicios.';
+  }
+
+  // ══════════════════════ INFORME ══════════════════════
+  function informeHtml(){
+    var res=calcular(), cv=document.createElement('canvas'); dibujar(cv,res); var png=cv.toDataURL('image/png');
+    var nM=D.servicios.filter(function(s){ return s.rol==='M'; }).length, nE=D.servicios.length-nM;
+    var nCamb=D.servicios.filter(function(s){ var r=res.porSvc[s.id]; if(!r||!s.actual) return false; return PARAMS.some(function(k){ var nv=r.p[k]; return nv!=null && s.actual[k]!=null && s.actual[k]!=='' && +s.actual[k]!==+nv; }); }).length;
+    var H2=function(t){ return '<h2 style="font-family:Arial;font-size:15px;text-transform:uppercase;text-decoration:underline;color:#1F2937;margin:26px 0 10px;break-after:avoid-page;">'+t+'</h2>'; };
+    var TH='style="background:#1F6FA8;color:#fff;font-style:italic;padding:5px 7px;text-align:left;font-weight:600;"', TD='style="padding:4px 7px;border-bottom:1px solid #ddd;vertical-align:top;"';
+    var cajaNum=function(v,t,col){ return '<td style="padding:8px 14px;text-align:center;border:1px solid #ddd;"><div style="font-size:20px;font-weight:700;color:'+col+';">'+v+'</div><div style="font-size:11px;color:#555;">'+t+'</div></td>'; };
+    var h='<div style="font-family:Arial;color:#111;">'
+      +'<div style="text-align:right;font-size:11px;color:#666;">Eliwell Ibérica SAT · '+esc(D.controlador)+'</div>'
+      +'<h1 style="font-family:Arial;text-align:center;color:#1F2937;font-size:24px;margin:30px 0 4px;">INFORME DE PROGRAMACIÓN DE DESESCARCHES</h1>'
+      +'<div style="text-align:center;font-size:15px;color:#1F6FA8;">Distribución de desescarches · '+esc(D.controlador)+'</div>'
+      +'<div style="text-align:center;font-size:18px;font-weight:700;margin:6px 0 4px;">'+esc(D.cod?('Centro '+D.cod+' · '):'')+esc(D.nombre||'')+'</div>'
+      +'<div style="text-align:center;font-size:12px;color:#555;margin-bottom:22px;">Fecha de la programación: <b>'+esc(fFecha(D.fecha))+'</b></div>'
+      +'<table style="border-collapse:collapse;margin:0 auto 10px;"><tr>'+cajaNum(D.servicios.length,'servicios','#1F6FA8')+cajaNum(nM,'maestros','#2F5496')+cajaNum(nE,'esclavos','#555')+cajaNum(res.grupos.length,'grupos de desescarche','#27AE60')+(D.servicios.some(function(s){return s.actual;})?cajaNum(nCamb,'equipos con cambios','#C55A11'):'')+'</tr></table>';
+    h+=H2('1. Objeto y alcance')+'<p style="font-size:12px;line-height:1.5;">Programación de los desescarches de '+D.servicios.length+' servicios del centro'+(D.cod?' '+esc(D.cod):'')+', repartidos por horario para que no coincidan demasiados a la vez. Fecha de la programación: <b>'+esc(fFecha(D.fecha))+'</b>.</p>'
+      +'<ul style="font-size:12px;line-height:1.5;">'+D.tipos.filter(function(t){ return t.orden.length; }).map(function(t){
+        var nS=deTipo(t.id).length; return '<li><b>'+esc(t.nombre)+'</b> ('+nS+'): '+(t.modo==='semanal'?'desescarche semanal: '+diasTxt(t).toLowerCase()+', ':'Fdn = '+t.fdn+' (cada '+(Math.round(1440/Math.max(1,t.fdn))/60)+' h), ')+'dit '+t.dit+' h maestro / '+(+t.dit+1)+' h esclavo; primer arranque a las '+esc(t.ini)+', '+t.sep+' min entre grupos'+(t.porSlot>1?', hasta '+t.porSlot+' maestros por grupo':'')+'.</li>'; }).join('')+'</ul>';
+    var obs=(D.obs||'').trim(), av=res.avisos;
+    if(obs||av.length) h+=H2('2. Observaciones a revisar')+'<div style="color:#C00000;font-size:12px;line-height:1.5;">'+(obs?esc(obs).replace(/\n/g,'<br>'):'')+(av.length?'<ul>'+av.map(function(a){ return '<li>'+esc(a)+'</li>'; }).join('')+'</ul>':'')+'</div>';
+    var n=(obs||av.length)?3:2;
+    h+=H2(n+'. Lógica de distribución')+'<table style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr><th '+TH+'>Tipo</th><th '+TH+'>Configuración</th><th '+TH+'>Frecuencia</th><th '+TH+'>Primer arranque</th><th '+TH+'>Separación</th></tr></thead><tbody>'
+      +D.tipos.filter(function(t){ return t.orden.length; }).map(function(t){
+        return '<tr><td '+TD+'>'+esc(t.nombre)+' ('+deTipo(t.id).length+')</td><td '+TD+'>dCt=4, '+(t.modo==='semanal'?'Fdn=0, ':'Fdn='+t.fdn+', ')+'dit='+t.dit+' h maestro / '+(+t.dit+1)+' h esclavo</td><td '+TD+'>'+(t.modo==='semanal'?diasTxt(t,false,' + '):'Cada '+(Math.round(1440/Math.max(1,t.fdn))/60)+' h')+'</td><td '+TD+'>'+esc(t.ini)+'</td><td '+TD+'>'+t.sep+' min entre grupos'+(t.porSlot>1?' · hasta '+t.porSlot+' maestros/grupo':'')+'</td></tr>'; }).join('')
+      +'</tbody></table><p style="font-size:11px;color:#555;">'+(D.reparto!=='orden'?'Reparto automático: cada maestro en el hueco que deja menos desescarches a la vez en la franja de 30 min más cargada (todo el día y todos los muebles); como mucho '+'los maestros por hueco indicados. ':'Reparto por orden: los grupos uno detrás de otro. ')+'Esclavos: dCt = 2, dit = el del maestro + 1, Fdn = 0 — siguen al maestro por Link2 sin necesitar hora de inicio.</p>';
+    h+='<div style="font-size:12px;line-height:1.5;margin-top:10px;"><b>Cómo se ha repartido y por qué</b><ul style="margin:4px 0 0 18px;padding:0;">'+explicacion(res).map(function(x){ return '<li>'+x+'</li>'; }).join('')+'</ul></div>';
+    h+=H2((n+1)+'. Gráfico de distribución (24 h)')+'<p style="font-size:11px;color:#555;">Cada servicio en su fila; barra llena = maestro, barra clara = esclavo. Abajo, cuántos '+(D.cargaModo==='servicios'?'servicios':'grupos (maestro con sus esclavos)')+' empiezan a desescarchar en cada franja de 30 min (con las islas semanales sumadas el día que desescarchan). Programación del '+esc(fFecha(D.fecha))+'.</p><img src="'+png+'" style="width:100%;border:1px solid #ddd;">';
+    // escalonamiento por grupos
+    h+='<div style="break-before:page;"></div>'+H2((n+2)+'. Tabla de escalonamiento');
+    [['pos','Positivos'],['neg','Negativos y cámaras']].forEach(function(g){
+      var gr=res.grupos.filter(function(x){ return x.tipo.fam===g[0]; }); if(!gr.length) return;
+      h+='<h3 style="font-family:Arial;font-size:13px;margin:12px 0 4px;">'+g[1]+'</h3><table style="width:100%;border-collapse:collapse;font-size:10.5px;"><thead><tr><th '+TH+'>Grupo</th><th '+TH+'>Mód.</th><th '+TH+'>Hora</th><th '+TH+'>Maestro → esclavo(s)</th><th '+TH+'>Desescarches</th></tr></thead><tbody>'
+        +gr.map(function(x){ return '<tr><td '+TD+'><b>'+esc(x.tipo.nombre)+'</b> · grupo '+(x.slot+1)+'</td><td '+TD+'>'+(1+x.esclavos.length)+'</td><td '+TD+'><b>'+hhmm(x.inicio)+'</b></td><td '+TD+'>'+esc(x.maestro.nombre)+' → '+(x.esclavos.length?x.esclavos.map(function(e){ return esc(e.nombre); }).join(', '):'—')+'</td><td '+TD+'>'+(x.tipo.modo==='semanal'?diasTxt(x.tipo,false,' + ')+' a las '+hhmm(x.inicio):x.horas.map(hhmm).join(' · '))+'</td></tr>'; }).join('')
+        +'</tbody></table>';
+    });
+    h+='<div style="break-before:page;"></div>'+H2((n+3)+'. Tabla de parámetros a programar')+'<p style="font-size:11px;color:#555;">'+(D.servicios.some(function(s){return s.actual;})?'«a→b» = valor actual leído del Televis → valor nuevo. ':'')+'d1H = 24 deshabilita el desescarche laborable; Fd1/Fd2 = 7 sin días semanales; Fd1/Fd2: 0 domingo … 6 sábado.</p>'+tablaCambios(res,true);
+    h+='<div style="margin-top:24px;font-size:10px;color:#777;border-top:1px solid #ddd;padding-top:6px;">Eliwell Ibérica SAT · '+esc(D.controlador)+' · Programación del '+esc(fFecha(D.fecha))+' · generado con el Hub Analítico</div></div>';
+    return h;
+  }
+  function nombreArchivo(ext){ return ('Desescarches_'+(D.cod||'centro')+'_'+(D.nombre||'').replace(/[^A-Za-z0-9]+/g,'_')+'_'+(D.fecha||hoy())).replace(/_+/g,'_')+'.'+ext; }
+  window.desInforme=function(fmt){
+    var body=informeHtml();
+    if(fmt==='pdf'&&HUB&&typeof HUB._pdfFromHtml==='function') return HUB._pdfFromHtml(body, nombreArchivo('pdf'));
+    if(fmt==='docx'&&HUB&&typeof HUB._docxFromHtml==='function') return HUB._docxFromHtml(body, nombreArchivo('docx'));
+    var css='<style>@page{margin:12mm;} body{background:#fff;margin:0;} h2,h3{break-after:avoid-page;} tr,img{break-inside:avoid;} img{max-width:100%;}</style>';
+    var html='<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>'+esc(nombreArchivo('html'))+'</title>'+css+'</head><body><div style="max-width:1000px;margin:0 auto;padding:20px;">'+body+'</div></body></html>';
+    if(fmt==='pdf'){   // sin el Hub: se abre el informe y el diálogo de imprimir → «Guardar como PDF»
+      var w=window.open('','_blank'); if(!w){ alert('El navegador ha bloqueado la ventana. Permite ventanas emergentes o usa «HTML».'); return; }
+      w.document.open(); w.document.write(html.replace('</body>','<script>setTimeout(function(){window.print();},600);<\/script></body>')); w.document.close(); return;
+    }
+    if(fmt==='docx') return dl('\ufeff'+html,'application/msword',nombreArchivo('doc'));
+    dl(html,'text/html',nombreArchivo('html'));
+  };
+  window.desExcel=function(){
+    var res=calcular(), F=[['Equipo','Tipo','Rol','Maestro'].concat(PARAMS).concat(PARAMS.map(function(k){ return k+' actual'; }))];
+    D.servicios.forEach(function(s){ var r=res.porSvc[s.id]; if(!r) return; var a=s.actual||{};
+      F.push([s.nombre, r.tipo.nombre, r.rol==='M'?'Maestro':'Esclavo', r.rol==='E'?r.maestro.nombre:''].concat(PARAMS.map(function(k){ var v=r.p[k]; if(r.rol==='E'&&/^(d1H|d1n|F1H|F1n)$/.test(k)) v=null; return v==null?'':v; })).concat(PARAMS.map(function(k){ return a[k]==null?'':a[k]; }))); });
+    var X=window.XLSX||(HUB&&HUB.XLSX);
+    if(X){ var wb=X.utils.book_new(); X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(F), 'Desescarches'); X.writeFile(wb, nombreArchivo('xlsx')); }
+    else dl('\ufeff'+F.map(function(r){ return r.map(function(c){ return '"'+String(c).replace(/"/g,'""')+'"'; }).join(';'); }).join('\r\n'),'text/csv;charset=utf-8',nombreArchivo('csv'));
+  };
+
+  // ══════════════════════ ACCIONES ══════════════════════
+  window.desPaso=function(i){ paso=Math.max(0,Math.min(4,i)); pintar(); };
+  window.desCampo=function(k,v){ D[k]=v; guardarBorrador(); };
+  window.desAutoNombre=function(cod){ var c=((HUB&&HUB.TG_CENTROS_DEFAULT)||[]).find(function(x){ return String(x.id)===String(cod); }); if(c&&!D.nombre){ D.nombre=c.nombre||''; var e=document.getElementById('des-nombre'); if(e) e.value=D.nombre; } };
+  window.desTipo=function(tid,k,v,repintar){ var t=tipoDe(tid); if(!t) return; if(['fdn','dit','sep','porSlot','dur','fd1','fd2'].indexOf(k)>=0) v=parseFloat(v)||0; t[k]=v; if(k==='fdn'&&v>0) t.dit=Math.round(24/v*10)/10; if(k==='modo'&&v==='semanal'&&t.fd1==null){ t.fd1=1; t.fd2=5; t.dit=96; } guardarBorrador(); if(repintar||k==='modo'||k==='fam') pintar(); };
+  window.desCantidad=function(tid,n){ ajustarCantidad(tid,n); pintar(); };
+  window.desCargaModo=function(v){ D.cargaModo=v; pintar(); };
+  window.desReparto=function(v){ D.reparto=v; pintar(); };
+  window.desVolverReglas=function(){ Object.keys(D.ajustes||{}).forEach(function(k){ var cad=(D.cadenas||{})[k]; if(!cad) return; var aj=D.ajustes[k];
+      Object.keys(aj).forEach(function(c){ if(c==='ventanaH'&&aj[c]===4) delete cad.ventanaH; else cad[c]=aj[c]; }); });
+    D.ajustes={}; D.mejoraAuto=false; D._autoCache=null; pintar(); guardarBorrador(); };
+  window.desRedistribuir=function(){
+    var fijos=D.servicios.filter(function(x){ return x.slotManual||x.horaManual; }).length;
+    if(fijos && confirm('Hay '+fijos+' maestro(s) con hueco u hora puestos a mano.\n\nAceptar = quitarlos y repartir todo de nuevo.\nCancelar = respetarlos y repartir el resto.')) D.servicios.forEach(function(x){ x.slotManual=''; x.horaManual=''; });
+    var antes=Math.max.apply(null, calcular().carga), ud=(D.cargaModo==='servicios'?'servicios':'grupos');
+    D.reparto='auto'; D.mejoraAuto=true; D._autoCache=null; calcular();
+    var o=D._autoCache.obj, aj=textoAjustes();
+    pintar(); guardarBorrador();
+    alert('Redistribuido: coinciden como mucho '+o[0]+' '+ud+' a la vez (antes '+antes+').'+(aj.length?'\n\nPara mejorarlo he ajustado: '+aj.join('; ')+'.':'')+'\n\nEn «5 · Resultado» tienes la explicación. Recuerda guardar la plantilla.');
+  };
+  window.desQuitarFijos=function(){ D.servicios.forEach(function(x){ x.slotManual=''; x.horaManual=''; }); pintar(); };
+  window.desHueco=function(id,v){ var x=svc(id); if(x){ x.slotManual=v||''; pintar(); } };
+  window.desCadena=function(k,c,v){ D.cadenas=D.cadenas||{}; var x=D.cadenas[k]; if(!x) return; x._usr=x._usr||{}; x._usr[c]=true; if(D.ajustes&&D.ajustes[k]) delete D.ajustes[k][c]; x[c]=(c==='ini')?v:(c==='huecoNuevo'?!!v:(parseFloat(v)||0)); if(c==='ventanaH'&&!(x[c]>0)) delete x[c]; if(c==='porSlot') x[c]=Math.max(1,Math.round(x[c])); pintar(); };
+  window.desMoverGrupo=function(tid,d){   // mover el grupo dentro de su cadena (salta a los de otros muebles)
+    var i=D.tipos.findIndex(function(t){ return t.id===tid; }); if(i<0) return; var k=claveCad(D.tipos[i]);
+    var j=i+d; while(j>=0&&j<D.tipos.length&&claveCad(D.tipos[j])!==k) j+=d;
+    if(j<0||j>=D.tipos.length) return; var x=D.tipos[i]; D.tipos[i]=D.tipos[j]; D.tipos[j]=x; pintar();
+  };
+  window.desForm=function(k,v,sinPintar){
+    FORM[k]=(k==='cantidad'||k==='cuantos'||k==='desde')?(parseInt(v,10)||0):v;
+    if(k==='mueble'){ var b=preset(v); FORM.nombre=b.pref; FORM.fam=b.fam; FORM.modo=b.modo; FORM.cuantos=(b.modo==='semanal'?2:b.fdn); }
+    if(k==='modo') FORM.cuantos=(v==='semanal'?2:preset(FORM.mueble).fdn||4);
+    if(!sinPintar) pintar();
+  };
+  /* 2026-11-10 — Rafa: «añade el ejemplo de Independencia… sin el nombre del centro ni el número, solo como
+     ejemplo». Instalación tipo: 25 grupos (murales, vitrinas, armarios, cámaras e islas semanales) con sus
+     maestros y esclavos. [mueble, nombre, cantidad, numerar desde, emparejar (2 = de 2 en 2, 3 = de 3 en 3)] */
+  var EJEMPLO=[['mural','MURAL VERDURAS',4,1,2],['mural','MURAL LÁCTEOS',4,1,2],['mural','MURAL LECHE FRESCA',1,1,0],['mural','MURAL CHARCUTERÍA',6,1,'c'],
+    ['mural','MURAL PLATOS PREPARADOS',4,1,2],['mural','MURAL LPC FRÍO',1,1,0],['mural','MURAL BEBIDAS LPC',1,1,0],['mural','MURAL PESCADO',1,1,0],['mural','MURAL BACALAO',1,1,0],
+    ['mural','MURAL SUSHI',1,1,0],['mural','MURAL PASTELERÍA',1,1,0],['mural','MURAL CARNES',6,1,0],
+    ['vitrina','VITRINA LPC',1,1,0],['vitrina','VITRINA LIBRE SERVICIO LPC',1,1,0],
+    ['armario','ARMARIO CONGELADOS',1,1,0],['armario','ARMARIO VERDURAS',2,2,0],
+    ['camara','CÁMARA BACALAO',1,1,0],['camara','CÁMARA REFRIGERADOS',1,1,0],['camara','CÁMARA PESCADO',1,1,0],['camara','CÁMARA CONGELADOS',1,1,0],
+    ['isla','ISLA PLATOS PREPARADOS',3,1,3],['isla','ISLA MARISCO',1,1,0],['isla','ISLA HORNO',1,1,0],['isla','ISLA CARNE',1,1,0],['isla','ISLA PESCADO',2,1,2]];
+  window.desEjemplo=function(){
+    if(D&&D.servicios.length&&!confirm('Se sustituye la programación de la pantalla por el ejemplo. ¿Seguir?')) return;
+    D=plan0(); D.nombre='Tienda de ejemplo'; D.ejemplo=true;
+    EJEMPLO.forEach(function(e){ var b=preset(e[0]); var t=nuevoGrupo({mueble:e[0], nombre:e[1], fam:b.fam, modo:b.modo, cuantos:(b.modo==='semanal'?2:b.fdn)}); t.desde=e[3]; ajustarCantidad(t.id, e[2]);
+      var L=deTipo(t.id);
+      if(e[4]===2||e[4]===3){ L.forEach(function(x,i){ if(i%e[4]){ x.rol='E'; x.maestro=L[i-(i%e[4])].id; } }); }
+      if(e[4]==='c'){ [4,5].forEach(function(i){ L[i].rol='E'; L[i].maestro=L[3].id; }); }   // charcutería 4 manda a la 5 y la 6
+    });
+    sincronizarOrden(); paso=4; pintar();
+  };
+  window.desCrearGrupo=function(){
+    var nom=String(FORM.nombre||'').trim(); if(!nom){ alert('Pon el nombre de los servicios'); return; }
+    if(D.servicios.length+FORM.cantidad>250){ alert('Máximo 250 servicios por programación.'); return; }
+    var t=nuevoGrupo({mueble:FORM.mueble, nombre:nom.toUpperCase(), fam:FORM.fam, modo:FORM.modo, cuantos:FORM.cuantos});
+    t.desde=FORM.desde; ajustarCantidad(t.id, FORM.cantidad);
+    FORM.desde=1; FORM.cantidad=1; pintar();
+  };
+  window.desBorrarGrupo=function(tid){
+    var t=tipoDe(tid); if(!t) return; if(!confirm('¿Quitar el grupo «'+t.nombre+'» y sus '+deTipo(tid).length+' servicio(s)?')) return;
+    var ids=deTipo(tid).map(function(x){ return x.id; });
+    D.servicios=D.servicios.filter(function(x){ return ids.indexOf(x.id)<0; });
+    D.servicios.forEach(function(x){ if(ids.indexOf(x.maestro)>=0){ x.rol='M'; x.maestro=null; } });
+    D.tipos=D.tipos.filter(function(x){ return x.id!==tid; }); sincronizarOrden(); pintar();
+  };
+  window.desNombre=function(id,v){ var s=svc(id); if(s){ s.nombre=v; guardarBorrador(); } };
+  window.desRol=function(id,v){ var s=svc(id); if(!s) return; s.rol=v; if(v==='M'){ s.maestro=null; } else { D.servicios.forEach(function(e){ if(e.maestro===id){ e.rol='M'; e.maestro=null; } }); } sincronizarOrden(); pintar(); };
+  window.desMaestro=function(id,m){ var s=svc(id); if(s){ s.maestro=m||null; pintar(); } };
+  window.desEmparejar=function(tid,n){ var L=deTipo(tid); L.forEach(function(s,i){ if(n<=1||i%n===0){ s.rol='M'; s.maestro=null; } else { s.rol='E'; s.maestro=L[i-(i%n)].id; } }); sincronizarOrden(); pintar(); };
+  window.desMover=function(tid,k,d){ var t=tipoDe(tid), j=k+d; if(!t||j<0||j>=t.orden.length) return; var x=t.orden[k]; t.orden[k]=t.orden[j]; t.orden[j]=x; pintar(); };
+  window.desHora=function(id,v){ var s=svc(id); if(s){ s.horaManual=v||''; pintar(); } };
+  window.desUmbral=function(k,v){ D.umbrales=D.umbrales||{medio:5,alta:7}; D.umbrales[k]=parseInt(v,10)||D.umbrales[k]; pintar(); };
+  window.desNuevo=function(){ if(D&&D.servicios.length&&!confirm('¿Empezar una programación nueva? Lo que no hayas guardado se pierde.')) return; D=plan0(); paso=0; pintar(); };
+  // Televis: servicios y parámetros actuales
+  var MODELOS=[/rtx\s*6\d{2}/i, /\brtn\b/i, /v800/i];
+  window.desImportarTG=function(){
+    if(!(hubTG()&&hubTG().equipos&&hubTG().equipos.length)){ alert('No hay equipos cargados en Televis.'); return; }
+    if(D.servicios.length&&!confirm('Se sustituyen los servicios actuales por los del Televis. ¿Seguir?')) return;
+    var eq=hubTG().equipos.filter(function(d){ return MODELOS.some(function(rx){ return rx.test(d.modelName||''); }); });
+    D.servicios=[];
+    D.tipos=[]; var porMueble={};
+    eq.forEach(function(d){ var nom=d.alias||d.name||d.address; var b=TIPOS_DEF.find(function(x){ return x.patron&&x.patron.test(nom); })||TIPOS_DEF[TIPOS_DEF.length-1];
+      var t=porMueble[b.id]||(porMueble[b.id]=nuevoGrupo({mueble:b.id, nombre:b.nombre.toUpperCase().replace(' SEMANALES',''), fam:b.fam, modo:b.modo, cuantos:(b.modo==='semanal'?2:b.fdn)}));
+      D.servicios.push({id:nuevoId(), tipo:t.id, nombre:nom, rol:'M', maestro:null, actual:null, uid:d.uid||d.address, interfaceId:d.interfaceId||'', modelo:d.modelName||''}); });
+    D.servicios.sort(function(a,b){ return a.nombre.localeCompare(b.nombre,'es',{numeric:true}); });
+    var c=(hubTG()&&hubTG()._centroConectado)||{}; if(!D.cod&&c.centroId) D.cod=c.centroId; if(!D.nombre&&c.centroNom) D.nombre=c.centroNom;
+    sincronizarOrden(); alert('Creados '+D.servicios.length+' servicios. Revisa el tipo y los maestros/esclavos en los pasos 2 y 3.'); paso=1; pintar();
+  };
+  window.desLeerActuales=async function(){
+    if(!(hubTG()&&hubTG().equipos&&hubTG().equipos.length)){ alert('No hay equipos cargados en Televis.'); return; }
+    var conUid=D.servicios.filter(function(s){ return s.uid; }); if(!conUid.length){ alert('Primero crea los servicios desde el Televis.'); return; }
+    var el=document.getElementById('des-lect'), ok=0;
+    for(var i=0;i<conUid.length;i++){ var s=conUid[i]; if(el) el.textContent='Leyendo '+(i+1)+'/'+conUid.length+': '+s.nombre+'…';
+      try{ var r=await HUB.tgAPI('POST','/ddp/params/read',{device:s.uid, interfaceId:s.interfaceId||'', modelName:s.modelo||'', labels:PARAMS, readAll:false});
+        var L=(r&&r.data&&r.data.params)||(r&&r.params)||[]; if(L.length){ s.actual={}; L.forEach(function(p){ var v=parseFloat(String(p.value).replace(',','.')); s.actual[p.label]=isNaN(v)?p.value:v; }); ok++; } }catch(e){} }
+    if(el) el.textContent='✓ Parámetros leídos de '+ok+' de '+conUid.length+' servicios';
+    guardarBorrador();
+  };
+  // BD
+  window.desGuardar=async function(){
+    if(!D.cod){ alert('Pon el código de centro (paso 1) antes de guardar.'); paso=0; pintar(); return; }
+    D.guardado=new Date().toISOString().slice(0,16); guardarBorrador();
+    var r=null; try{ r=await api()('POST','/desescarchaGuardar',{plan:D},30000); }catch(e){}
+    alert(r&&r.ok?'✓ Guardado en la base de datos ('+D.cod+').':'No se ha podido guardar en la base de datos'+(r&&r.error?' ('+r.error+')':'')+'. Queda guardado en este navegador.');
+  };
+  window.desAbrirLista=async function(){
+    var box=document.getElementById('des-lista'); if(!box) return;
+    box.innerHTML='Cargando…';
+    var r=null; try{ r=await api()('GET','/desescarchaLista',null,20000); }catch(e){}
+    var L=(r&&r.items)||[];
+    box.innerHTML=caja('Programaciones guardadas'+(r&&r.bd===false?' <span style="color:#f5a623;font-size:13px;">(sin base de datos)</span>':''),
+      L.length?L.map(function(x){ return '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-top:1px solid var(--bd);font-size:13px;"><b>'+esc(x.cod)+'</b> '+esc(x.nombre||'')+' <span style="color:var(--mu);">· programación del '+esc(fFecha(x.fecha))+' · '+(x.servicios||0)+' servicios · guardado '+esc(String(x.actualizado||'').slice(0,16))+'</span><span style="flex:1"></span><button class="tb tb-sm" onclick="desAbrir(\''+esc(x.cod)+'\')">Abrir</button><button class="tb tb-sm tb-gh" style="color:#ef4444;" onclick="desBorrar(\''+esc(x.cod)+'\')">🗑</button></div>'; }).join('')
+        :'<div style="font-size:13px;color:var(--mu);">No hay programaciones guardadas.</div>');
+  };
+  window.desAbrir=async function(cod){
+    var r=null; try{ r=await api()('GET','/desescarchaGet?cod='+encodeURIComponent(cod),null,20000); }catch(e){}
+    if(!(r&&r.ok&&r.plan)){ alert('No se ha podido abrir.'); return; }
+    if(D&&D.servicios.length&&!confirm('Se abre la programación de '+cod+' y se sustituye la de la pantalla. ¿Seguir?')) return;
+    D=r.plan; paso=4; pintar();
+  };
+  window.desBorrar=async function(cod){
+    if(!confirm('¿Borrar la programación guardada de '+cod+'?')) return;
+    try{ await api()('POST','/desescarchaBorrar',{cod:cod},20000); }catch(e){}
+    window.desAbrirLista();
+  };
+  window.desGuardarArchivo=function(){ D.guardado=new Date().toISOString().slice(0,16); guardarBorrador(); dl(JSON.stringify(D,null,1),'application/json',nombreArchivo('json').replace(/^Desescarches_/,'Programacion_desescarches_')); };
+  window.desAbrirArchivo=function(){
+    var i=document.createElement('input'); i.type='file'; i.accept='.json,application/json';
+    i.onchange=function(){ var f=i.files&&i.files[0]; if(!f) return; var r=new FileReader();
+      r.onload=function(){ try{ var p=JSON.parse(r.result); if(!p||!p.tipos||!p.servicios) throw new Error('no es una programación de Desescarcha');
+        if(D&&D.servicios.length&&!confirm('Se sustituye la programación de la pantalla. ¿Seguir?')) return; D=p; paso=4; sincronizarOrden(); pintar(); }catch(e){ alert('No se ha podido abrir: '+e.message); } };
+      r.readAsText(f,'utf-8'); };
+    i.click();
+  };
+  window.desAsegurar=function(){ if(!D){ D=cargarBorrador()||plan0(); } if(D&&D.tipos) D.tipos=D.tipos.filter(function(t){ return deTipo(t.id).length||t.orden&&t.orden.length; }); pintar(); };
+  // para pruebas
+  window._desEstado=function(){ return D; }; window._desCalcular=function(){ return calcular(); }; window._desInformeHtml=function(){ return informeHtml(); };
+  window._desCargar=function(p){ D=p; sincronizarOrden(); pintar(); };
+  document.addEventListener('DOMContentLoaded', function(){ window.desAsegurar(); });
+})();
+</script>
+<script>/* app instalable: se guarda para usarla sin cobertura */if('serviceWorker' in navigator && location.protocol==='https:'){navigator.serviceWorker.register('sw.js');}</script>
+</body>
+</html>
