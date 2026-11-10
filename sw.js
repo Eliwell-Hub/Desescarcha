@@ -1,5 +1,5 @@
-// Desescarcha — guarda la app para usarla sin cobertura. Versión 83736bcf8a85
-var CACHE='desescarcha-83736bcf8a85';
+// Desescarcha — guarda la app para usarla sin cobertura. Versión 92c4100c1a19
+var CACHE='desescarcha-92c4100c1a19';
 var FICHEROS=['./','index.html','manifest.webmanifest','icono-192.png','icono-512.png'];
 self.addEventListener('install',function(e){ e.waitUntil(caches.open(CACHE).then(function(c){ return c.addAll(FICHEROS); })); self.skipWaiting(); });
 self.addEventListener('activate',function(e){ e.waitUntil(caches.keys().then(function(ks){ return Promise.all(ks.filter(function(k){ return k!==CACHE; }).map(function(k){ return caches.delete(k); })); })); self.clients.claim(); });
