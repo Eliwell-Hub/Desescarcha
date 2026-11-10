@@ -1,0 +1,26 @@
+{
+ "name": "Desescarcha · Eliwell Ibérica SAT",
+ "short_name": "Desescarcha",
+ "description": "Programación y reparto de desescarches (RTX 600 / RTN / V800): maestros y esclavos, gráfico de 24 h e informe.",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "any",
+ "background_color": "#0f1420",
+ "theme_color": "#e86c1f",
+ "lang": "es",
+ "icons": [
+  {
+   "src": "icono-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any maskable"
+  },
+  {
+   "src": "icono-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any maskable"
+  }
+ ]
+}
